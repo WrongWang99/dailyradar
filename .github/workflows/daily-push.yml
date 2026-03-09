@@ -1,0 +1,37 @@
+# 每日市场雷达：定时推送 + 支持手动触发
+# 定时：UTC+8 周一到周五 9:00（即 UTC 1:00）
+# 手动：Actions 页选择 "Daily Push" -> "Run workflow"
+
+name: Daily Push
+
+on:
+  schedule:
+    # 北京时间 9:00 = UTC 1:00，周一到周五
+    - cron: "0 1 * * 1-5"
+  workflow_dispatch:
+
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      # 本地用 .env；线上无 .env，用 Secrets（必填）+ Variables（可选，与 .env 里同名即可）
+      - name: Run daily push bot
+        env:
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+          FEISHU_CARD_TITLE: ${{ vars.FEISHU_CARD_TITLE }}
+          FEISHU_CARD_HEADER_TEMPLATE: ${{ vars.FEISHU_CARD_HEADER_TEMPLATE }}
+          CLS_KEYWORD: ${{ vars.CLS_KEYWORD }}
+          INDEX_PRODUCTS_TXT: ${{ vars.INDEX_PRODUCTS_TXT }}
+          PRODUCT_NAME_WRAP_WIDTH: ${{ vars.PRODUCT_NAME_WRAP_WIDTH }}
+        run: python daily_push_bot.py
