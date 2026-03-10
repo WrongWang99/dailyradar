@@ -62,10 +62,46 @@ SECTION_HEADER_HOTSPOT = "【今日投资舆情热点】"  # 与 CLS_KEYWORD 对
 _txt_path = _env("INDEX_PRODUCTS_TXT", "index_products.txt")
 DEFAULT_TXT_PATH = Path(_txt_path) if os.path.isabs(_txt_path) else _SCRIPT_DIR / _txt_path
 
+_non_trading_path = _env("NON_TRADING_DAYS_TXT", "non_trading_days.txt")
+NON_TRADING_DAYS_PATH = Path(_non_trading_path) if os.path.isabs(_non_trading_path) else _SCRIPT_DIR / _non_trading_path
+
 try:
     PRODUCT_NAME_WRAP_WIDTH = int(_env("PRODUCT_NAME_WRAP_WIDTH", "18"))
 except ValueError:
     PRODUCT_NAME_WRAP_WIDTH = 18
+
+
+# ---------------------------------------------------------------------------
+# 非交易日（跳过推送）
+# ---------------------------------------------------------------------------
+
+
+def _load_non_trading_days(filepath: Path) -> set[date]:
+    """从 txt 读取非交易日，每行一个 YYYY-MM-DD，返回 date 集合。"""
+    out: set[date] = set()
+    if not filepath.exists():
+        return out
+    try:
+        for line in filepath.read_text(encoding="utf-8").splitlines():
+            s = line.strip()
+            if not s or s.startswith("#"):
+                continue
+            m = re.match(r"(\d{4}-\d{2}-\d{2})", s)
+            if m:
+                try:
+                    out.add(datetime.strptime(m.group(1), "%Y-%m-%d").date())
+                except ValueError:
+                    pass
+    except Exception as e:
+        print(f"[non_trading_days] 读取 {filepath} 失败: {e}")
+    return out
+
+
+def is_today_non_trading(filepath: Path) -> bool:
+    """当前日期(UTC+8)是否在非交易日列表中。"""
+    today = _today_utc8()
+    non_trading = _load_non_trading_days(filepath)
+    return today in non_trading
 
 
 # ---------------------------------------------------------------------------
@@ -462,6 +498,10 @@ if __name__ == "__main__":
         if not FEISHU_WEBHOOK:
             print("错误：未配置 FEISHU_WEBHOOK_URL。请复制 .env.example 为 .env 并填写 Webhook。")
             raise SystemExit(1)
+
+        if is_today_non_trading(NON_TRADING_DAYS_PATH):
+            print(f"今日({_today_utc8().isoformat()})在非交易日列表中，跳过推送。")
+            raise SystemExit(0)
 
         txt_content = read_txt_content(DEFAULT_TXT_PATH)
         if txt_content:
