@@ -246,28 +246,49 @@ def _countdown_text(issue_date: date) -> str:
     return " 已过"
 
 
-def _parse_product_line(line: str) -> Optional[tuple[str, str, str, str]]:
+def _parse_product_line(line: str) -> Optional[tuple[str, str, str, str, str]]:
     """
-    从一行解析：产品名称、代码、发行日、发行倒计时。
-    返回 (name, code, issue_date, countdown_str)，解析失败返回 None。
+    从一行解析：产品名称、代码、状态(发行/上市)、日期、倒计时。
+    返回 (name, code, status, date_str, countdown_str)，解析失败返回 None。
+    状态：行内含「上市日」或「状态 上市」则为「上市」，否则为「发行」。
     """
     line = line.strip()
     if not line:
         return None
+    # 状态：显式「状态 上市」或含「上市日」为上市，否则发行
+    if re.search(r"状态\s*上市|上市日", line):
+        status = "上市"
+    else:
+        status = "发行"
+
     code_m = re.search(r"代码\s*(\d+)", line)
     date_m = re.search(r"发行日\s*(\d{4}-\d{2}-\d{2})", line)
-    if not code_m or not date_m:
+    if not date_m:
+        date_m = re.search(r"上市日\s*(\d{4})年(\d{1,2})月(\d{1,2})日", line)
+        if date_m:
+            y, m, d = date_m.group(1), date_m.group(2).zfill(2), date_m.group(3).zfill(2)
+            issue_date_str = f"{y}-{m}-{d}"
+        else:
+            issue_date_str = ""
+    else:
+        issue_date_str = date_m.group(1)
+
+    if not issue_date_str:
         return None
-    # 产品名称：从开头到「代码」之前
-    name = line[: code_m.start()].strip()
-    code = code_m.group(1)
-    issue_date_str = date_m.group(1)
+    if code_m:
+        name = line[: code_m.start()].strip()
+        code = code_m.group(1)
+    else:
+        name = re.sub(r"\s*(无代码|上市日|发行日).*", "", line).strip()
+        code = "-"
+    if not issue_date_str:
+        return None
     try:
         issue_date = datetime.strptime(issue_date_str, "%Y-%m-%d").date()
-        cnt = _countdown_text(issue_date).strip()  # 倒计时今日 / 倒计时3天 / 已过
+        cnt = _countdown_text(issue_date).strip()
     except ValueError:
         cnt = "-"
-    return (name or "-", code, issue_date_str, cnt)
+    return (name or "-", code, status, issue_date_str, cnt)
 
 
 def _wrap_text(s: str, width: int = 18) -> str:
@@ -279,7 +300,8 @@ def _wrap_text(s: str, width: int = 18) -> str:
 
 def _build_products_column_set_elements(content: str, name_wrap_width: int = 18) -> list[dict]:
     """
-    用 column_set 构建「产品名称、代码、发行日、发行倒计时」表格元素列表。
+    用 column_set 构建「产品名称、代码、状态、日期、倒计时」表格元素列表。
+    只保留发行日/上市日 >= 今日(UTC+8) 的产品，已过期的不展示。
     产品名称超过 name_wrap_width 字时自动换行。
     """
     lines = [ln.strip() for ln in content.strip().splitlines() if ln.strip()]
@@ -288,34 +310,44 @@ def _build_products_column_set_elements(content: str, name_wrap_width: int = 18)
         parsed = _parse_product_line(ln)
         if parsed:
             rows.append(parsed)
+    # 只保留今日及以后的产品，已过期的不显示
+    today = _today_utc8()
+    def _not_past(date_str: str) -> bool:
+        try:
+            d = datetime.strptime(date_str, "%Y-%m-%d").date()
+            return d >= today
+        except ValueError:
+            return True
+    rows = [r for r in rows if _not_past(r[3])]
     if not rows:
         return []
 
     def col_md(text: str) -> dict:
-        """卡片 body 内仅支持 markdown 等类型，不支持 plain_text 块，故全部用 markdown。"""
         return {"tag": "markdown", "content": text or "-"}
 
     elements = []
 
-    # 表头行（产品名列宽占比更大便于换行显示）
+    # 表头：产品名称、代码、状态、日期、倒计时
     elements.append({
         "tag": "column_set",
         "columns": [
             {"tag": "column", "width": "weighted", "weight": 3, "elements": [col_md("**产品名称**")]},
             {"tag": "column", "width": "weighted", "weight": 1, "elements": [col_md("**代码**")]},
-            {"tag": "column", "width": "weighted", "weight": 1, "elements": [col_md("**发行日**")]},
-            {"tag": "column", "width": "weighted", "weight": 1, "elements": [col_md("**发行倒计时**")]},
+            {"tag": "column", "width": "weighted", "weight": 1, "elements": [col_md("**发行/上市**")]},
+            {"tag": "column", "width": "weighted", "weight": 1, "elements": [col_md("**日期**")]},
+            {"tag": "column", "width": "weighted", "weight": 1, "elements": [col_md("**倒计时**")]},
         ],
     })
 
-    # 数据行（产品名称超过 name_wrap_width 字自动换行）
-    for name, code, date, cnt in rows:
+    # 数据行
+    for name, code, status, date, cnt in rows:
         wrapped_name = _wrap_text(name, name_wrap_width)
         elements.append({
             "tag": "column_set",
             "columns": [
                 {"tag": "column", "width": "weighted", "weight": 3, "elements": [col_md(wrapped_name)]},
                 {"tag": "column", "width": "weighted", "weight": 1, "elements": [col_md(code)]},
+                {"tag": "column", "width": "weighted", "weight": 1, "elements": [col_md(status)]},
                 {"tag": "column", "width": "weighted", "weight": 1, "elements": [col_md(date)]},
                 {"tag": "column", "width": "weighted", "weight": 1, "elements": [col_md(cnt)]},
             ],
@@ -349,12 +381,16 @@ def _normalize_scraped_line(line: str) -> str:
 
 def _format_scraped_as_numbered(content: str) -> str:
     """
-    将爬取的行业热点格式化为有序列表。【今日投资舆情热点】不加序号；其余条目标题用 1. 2. 3.；
-    文本自带的 1）2） 等会在 _normalize_scraped_line 中删除。
+    将爬取的行业热点格式化为有序列表 1. 2. 3.；
+    先从整段文本中彻底删除「【今日投资舆情热点】」再解析；文本自带的 1）2） 等会在 _normalize_scraped_line 中删除。
     """
     if not content.strip():
         return ""
-    parts = re.split(r"\n+", content.strip())
+    # 从整段中删除该标题（含常见变体：全角括号、前后空白、单独成行）
+    content = re.sub(r"\s*【今日投资舆情热点】\s*", "\n", content)
+    content = re.sub(r"\n{2,}", "\n", content).strip()
+
+    parts = re.split(r"\n+", content)
     parts = [p.strip() for p in parts if p.strip()]
     if len(parts) == 1 and len(parts[0]) > 80:
         parts = [p.strip() for p in re.split(r"[。；]\s*", parts[0]) if p.strip()]
@@ -362,15 +398,6 @@ def _format_scraped_as_numbered(content: str) -> str:
     parts = [p for p in parts if p]
     if not parts:
         return ""
-
-    # 首段若是【今日投资舆情热点】，不加序号，单独一行；其余从 1. 开始编号
-    if parts[0].strip() == SECTION_HEADER_HOTSPOT or parts[0].startswith(SECTION_HEADER_HOTSPOT):
-        header = parts[0]
-        rest = parts[1:]
-        if not rest:
-            return header
-        numbered = "\n".join(f"{i}. {p}" for i, p in enumerate(rest, 1))
-        return f"{header}\n\n{numbered}"
     return "\n".join(f"{i}. {p}" for i, p in enumerate(parts, 1))
 
 
