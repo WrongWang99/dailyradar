@@ -5,9 +5,6 @@
 name: Daily Push
 
 on:
-  schedule:
-    # 北京时间 9:00 = UTC 1:00，周一到周五
-    - cron: "0 1 * * 1-5"
   workflow_dispatch:
 
 jobs:
