@@ -298,7 +298,8 @@ def _parse_product_line(line: str) -> Optional[tuple[str, str, str, str, str]]:
         status = "发行"
 
     code_m = re.search(r"代码\s*(\d+)", line)
-    date_m = re.search(r"发行日\s*(\d{4}-\d{2}-\d{2})", line)
+    # 日期：发行日/上市日 + YYYY-MM-DD 或 上市日 + YYYY年M月D日
+    date_m = re.search(r"(?:发行日|上市日)\s*(\d{4}-\d{2}-\d{2})", line)
     if not date_m:
         date_m = re.search(r"上市日\s*(\d{4})年(\d{1,2})月(\d{1,2})日", line)
         if date_m:
@@ -448,12 +449,14 @@ def _build_feishu_card(txt_content: str, scraped_content: str) -> dict:
     """
     elements = []
 
-    # 上部分：指数产品待发行/上市（column_set 表格）
+    # 上部分：指数产品待发行/上市（有则表格，无则提示「今日无待发行/上市产品」）
     top_title = "【📊 哪些指数产品待发行/上市?】"
     column_set_elements = _build_products_column_set_elements(txt_content, name_wrap_width=PRODUCT_NAME_WRAP_WIDTH)
+    elements.append({"tag": "markdown", "content": f"**{top_title}**"})
     if column_set_elements:
-        elements.append({"tag": "markdown", "content": f"**{top_title}**"})
         elements.extend(column_set_elements)
+    else:
+        elements.append({"tag": "markdown", "content": "今日无待发行/上市产品"})
 
     # 下部分：行业热点
     bottom_title = "【🔥 哪些行业火?】"
