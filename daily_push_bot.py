@@ -208,6 +208,19 @@ def fetch_detail_page_text(detail_id: str) -> str:
     return resp.text
 
 
+def _extract_content_from_next_data(data: dict) -> Optional[str]:
+    """从 __NEXT_DATA__ JSON 中按已知路径查找 articleDetail.content。"""
+    props = data.get("props") or {}
+    candidates = [
+        props.get("pageProps", {}).get("articleDetail", {}).get("content"),
+        props.get("initialState", {}).get("detail", {}).get("articleDetail", {}).get("content"),
+    ]
+    for content in candidates:
+        if isinstance(content, str) and content.strip():
+            return content.strip()
+    return None
+
+
 def extract_main_telegram_text(raw_html: str) -> str:
     """
     从 detail 页 HTML 中提取电报正文内容（articleDetail.content）。
@@ -221,16 +234,10 @@ def extract_main_telegram_text(raw_html: str) -> str:
         raise RuntimeError("未找到 __NEXT_DATA__ 脚本块，无法解析正文")
 
     data = json.loads(m.group(1))
-    content = (
-        data.get("props", {})
-        .get("initialState", {})
-        .get("detail", {})
-        .get("articleDetail", {})
-        .get("content")
-    )
-    if not isinstance(content, str) or not content.strip():
+    content = _extract_content_from_next_data(data)
+    if not content:
         raise RuntimeError("在 __NEXT_DATA__ 中未找到正文 content 字段")
-    return content.strip()
+    return content
 
 
 def get_latest_telegram(keyword: str = "今日投资舆情热点") -> str:
